@@ -1,0 +1,81 @@
+#include <iostream>
+#include <openssl/evp.h>
+#include <openssl/rand.h>
+#include <openssl/err.h>
+#include <string.h>
+
+const int KEY_SIZE = 32; // Key size in bytes for AES-256
+
+void handleErrors(void) {
+    ERR_print_errors_fp(stderr);
+    abort();
+}
+
+void encryptDecryptAES(const unsigned char *plaintext, int plaintext_len, const unsigned char *key, unsigned char *ciphertext, unsigned char *tag, int enc) {
+    EVP_CIPHER_CTX *ctx;
+    int len, ciphertext_len;
+    if (!(ctx = EVP_CIPHER_CTX_new())) handleErrors();
+
+    if (1 != EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, key, NULL))
+        handleErrors();
+
+    if (enc) {
+        if (1 != EVP_EncryptUpdate(ctx, ciphertext, &len, plaintext, plaintext_len))
+            handleErrors();
+        ciphertext_len = len;
+
+        if (1 != EVP_EncryptFinal_ex(ctx, ciphertext + len, &len))
+            handleErrors();
+        ciphertext_len += len;
+
+        if (1 != EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, 16, tag))
+            handleErrors();
+    } else {
+        if (1 != EVP_DecryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, key, NULL))
+            handleErrors();
+        
+        if (1 != EVP_DecryptUpdate(ctx, ciphertext, &len, plaintext, plaintext_len))
+            handleErrors();
+        ciphertext_len = len;
+
+        if (1 != EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, 16, tag))
+            handleErrors();
+
+        if (1 != EVP_DecryptFinal_ex(ctx, ciphertext + len, &len))
+            handleErrors();
+        ciphertext_len += len;
+    }
+
+    EVP_CIPHER_CTX_free(ctx);
+}
+
+int main() {
+    unsigned char plaintext[] = "This is a secret message";
+    unsigned char ciphertext[1024];
+    unsigned char decryptedtext[1024];
+    unsigned char key[KEY_SIZE];
+    unsigned char tag[16]; // Authentication tag length for AES-GCM is typically 16 bytes
+
+    // Generate a secure random key for encryption
+    if (RAND_bytes(key, KEY_SIZE) != 1) {
+        handleErrors();
+    }
+
+    // Encrypt the plaintext
+    encryptDecryptAES(plaintext, strlen((char *)plaintext), key, ciphertext, tag, 1);
+    std::cout << "Encrypted: ";
+    for (int i = 0; i < sizeof(ciphertext); i++) {
+        printf("%02x", ciphertext[i]);
+    }
+    std::cout << std::endl << "Tag: ";
+    for (int i = 0; i < sizeof(tag); i++) {
+        printf("%02x", tag[i]);
+    }
+    std::cout << std::endl;
+
+    // Decrypt the ciphertext
+    encryptDecryptAES(ciphertext, strlen((char *)ciphertext), key, decryptedtext, tag, 0);
+    std::cout << "Decrypted: " << decryptedtext << std::endl;
+
+    return 0;
+}
